@@ -1,0 +1,477 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+	
+<title>Yanan Final Project</title>
+
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/4.13/esri/themes/light/main.css"
+    />
+    <script src="https://js.arcgis.com/4.13/"></script>
+
+    <style>
+      html,
+      body,
+       #viewDiv {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      #infoDiv {
+        background-color: white;
+        color: black;
+        padding: 6px;
+        width: 400px;
+      }
+
+      #results {
+        font-weight: bolder;
+        padding-top: 10px;
+      }
+      .slider {
+        width: 100%;
+        height: 60px;
+      }
+      #drop-downs {
+        padding-bottom: 15px;
+      }
+	  
+	   #seasons-filter {
+        height: 160px;
+        width: 100%;
+        visibility: hidden;
+      }
+
+      .season-item {
+        width: 100%;
+        padding: 12px;
+        text-align: center;
+        vertical-align: baseline;
+        cursor: pointer;
+        height: 40px;
+      }
+
+      .season-item:focus {
+        background-color: dimgrey;
+      }
+
+      .season-item:hover {
+        background-color: dimgrey;
+      }
+
+      #titleDiv {
+        padding: 10px;
+      }
+
+      #titleText {
+        font-size: 20pt;
+        font-weight: 60;
+        padding-bottom: 10px;
+    </style>
+    <script>
+      require([
+        "esri/Map",
+        "esri/views/MapView",
+        "esri/layers/FeatureLayer",
+        "esri/layers/GraphicsLayer",
+        "esri/geometry/geometryEngine",
+        "esri/Graphic",
+        "esri/widgets/Slider",
+		"esri/widgets/BasemapToggle",
+		"esri/widgets/ScaleBar",
+		"esri/widgets/Legend",
+		"esri/WebMap",
+		"esri/widgets/LayerList",
+		"esri/widgets/Search",
+		"esri/widgets/Expand",
+		"esri/widgets/CoordinateConversion",
+		"esri/widgets/LayerList",
+		
+      ], function(
+        Map,
+        MapView,
+        FeatureLayer,
+        GraphicsLayer,
+        geometryEngine,
+        Graphic,
+        Slider,
+		BasemapToggle, 
+		ScaleBar,
+		Legend,
+		WebMap,
+		LayerList,
+		Search,
+		Expand,CoordinateConversion,
+		LayerList,
+      ) {
+		
+        var quakesUrl =
+          "https://services2.arcgis.com/VNo0ht0YPXJoI4oE/arcgis/rest/services/LAKES/FeatureServer/1";
+
+        var stationBuffer, stationGeometries, elevation;
+
+        var stationTypeSelect = document.getElementById("station-type");
+
+        var magSlider = new Slider({
+          container: "mag",
+          min: 800,
+          max: 1800,
+          steps: 50,
+          values: [1300],
+          rangeLabelsVisible: true,
+          labelsVisible: true
+        });
+
+        var distanceSlider = new Slider({
+          container: "distance",
+          min: 1,
+          max: 50,
+          steps: 1,
+          labelFormatFunction: function(value, type) {
+            if (type === "value") {
+              return parseInt(value);
+            }
+            return value;
+          },
+          values: [25],
+          rangeLabelsVisible: true,
+          labelsVisible: true
+        });
+
+        var climate = new FeatureLayer({
+         portalItem: {
+            // autocasts as new PortalItem()
+            id: "4896749912664f659cebb8dacb9a0082"
+          },
+          outFields: ["*"],
+          visible: true
+        });
+		
+        var queryQuakes = document.getElementById("query-quakes");
+
+        var stationLayer = new FeatureLayer({
+          portalItem: {
+            // autocasts as new PortalItem()
+            id: "70122aa1a16649db8ad468c5f7f3cb99"
+          },
+          outFields: ["*"],
+          visible: false
+        });
+
+        // historic earthquakes
+        var quakesLayer = new FeatureLayer({
+          url: quakesUrl,
+          outFields: ["*"],
+          visible: false
+        });
+
+		
+        let floodLayerView;
+
+        // flash flood warnings layer
+        const layer = new FeatureLayer({
+          portalItem: {
+            id: "b9809bfe573b4cd9b6e0b4b816ed2cdb"
+          },
+          outFields: ["Class"]
+        });
+		
+        // GraphicsLayer for displaying results
+        var resultsLayer = new GraphicsLayer();
+
+        var map = new Map({
+          basemap: "dark-gray",
+          layers: [stationLayer, quakesLayer, resultsLayer,climate, layer],
+		  popup: {
+            dockEnabled: true,
+            dockOptions: {
+              position: "top-right",
+              breakpoint: false
+            }}
+        });
+
+        var view = new MapView({
+          container: "viewDiv",
+          map: map,
+          center: [-94.7, 46.5],
+          zoom: 7
+        });
+        view.ui.add("infoDiv", "top-right");
+        
+		 var ccWidget = new CoordinateConversion({
+          view: view
+        });
+
+        view.ui.add(ccWidget, "bottom-left");
+		
+		view.when(function() {
+          var layerList = new LayerList({
+            view: view
+          });
+
+          // Add widget to the top right corner of the view
+          view.ui.add(layerList, "top-right");
+        });
+		  
+		const seasonsNodes = document.querySelectorAll(`.season-item`);
+        const seasonsElement = document.getElementById("seasons-filter");
+
+        // click event handler for seasons choices
+        seasonsElement.addEventListener("click", filterBySeason);
+
+        // User clicked on Winter, Spring, Summer or Fall
+        // set an attribute filter on flood warnings layer view
+        // to display the warnings issued in that season
+        function filterBySeason(event) {
+          const selectedSeason = event.target.getAttribute("data-groups");
+          floodLayerView.filter = {
+            where: "Class = '" + selectedSeason + "'"
+          };
+        }
+
+        view.whenLayerView(layer).then(function(layerView) {
+          // flash flood warnings layer loaded
+          // get a reference to the flood warnings layerview
+          floodLayerView = layerView;
+
+          // set up UI items
+          seasonsElement.style.visibility = "visible";
+          const seasonsExpand = new Expand({
+            view: view,
+            content: seasonsElement,
+            expandIconClass: "esri-icon-filter",
+            group: "top-left"
+          });
+          //clear the filters when user closes the expand widget
+          seasonsExpand.watch("expanded", function() {
+            if (!seasonsExpand.expanded) {
+              floodLayerView.filter = null;
+            }
+          });
+          view.ui.add(seasonsExpand, "top-left");
+          view.ui.add("titleDiv", "top-left");
+        });
+
+        // query all features from the station layer
+        view
+          .when(function() {
+            return stationLayer.when(function() {
+              var query = stationLayer.createQuery();
+              return stationLayer.queryFeatures(query);
+            });
+          })
+          .then(getValues)
+          .then(getUniqueValues)
+          .then(addToSelect)
+          .then(createBuffer);
+
+        // return an array of all the values in the
+        // DP10 field of the station layer
+        function getValues(response) {
+          var features = response.features;
+          var values = features.map(function(feature) {
+            return feature.attributes.DP10;
+          });
+          return values;
+        }
+
+        // return an array of unique values in
+        // the DP10 field of the station layer
+        function getUniqueValues(values) {
+          var uniqueValues = [];
+
+          values.forEach(function(item, i) {
+            if (
+              (uniqueValues.length < 1 || uniqueValues.indexOf(item) === -1) &&
+              item !== ""
+            ) {
+              uniqueValues.push(item);
+            }
+          });
+          return uniqueValues;
+        }
+
+        function addToSelect(values) {
+          values.sort();
+          values.forEach(function(value) {
+            var option = document.createElement("option");
+            option.text = value;
+            stationTypeSelect.add(option);
+          });
+
+          return setstationDefinitionExpression(stationTypeSelect.value);
+        }
+
+        // set the definition expression on the station
+        // layer to reflect the selection of the user
+        function setstationDefinitionExpression(newValue) {
+          stationLayer.definitionExpression = "DP10 = '" + newValue + "'";
+
+          if (!stationLayer.visible) {
+            stationLayer.visible = true;
+          }
+
+          return queryForWellGeometries();
+        }
+
+        // Get all the geometries of the station layer
+        // the createQuery() method creates a query
+        // object that respects the definitionExpression
+        // of the layer
+        function queryForWellGeometries() {
+          var stationQuery = stationLayer.createQuery();
+
+          return stationLayer.queryFeatures(stationQuery).then(function(response) {
+            stationGeometries = response.features.map(function(feature) {
+              return feature.geometry;
+            });
+
+            return stationGeometries;
+          });
+        }
+
+        // creates a single buffer polygon around
+        // the well geometries
+
+        var bufferGraphic = null;
+		
+        function createBuffer(stationPoints) {
+          var bufferDistance = distanceSlider.values[0];
+          var stationBuffers = geometryEngine.geodesicBuffer(
+            stationPoints,
+            [bufferDistance],
+            "miles",
+            true
+          );
+		  
+          stationBuffer = stationBuffers[0];
+		  console.log(stationBuffer);
+
+          if (bufferGraphic) {
+            bufferGraphic.geometry = stationBuffer;
+          } else {
+            // add the buffer to the view as a graphic
+            bufferGraphic = new Graphic({
+              geometry: stationBuffer,
+              symbol: {
+                type: "simple-fill", // autocasts as new SimpleFillSymbol()
+                outline: {
+                  width: 3,
+                  color: [255, 128, 0, 0.5]
+                },
+                style: "none"
+              }
+            });
+             view.graphics.add(bufferGraphic);
+			// view.graphics.addMany(bufferGraphic);
+          }
+        }
+
+        // Get the elevation value set by the user
+        magSlider.on("thumb-drag", function(event) {
+          elevation = event.value;
+        });
+        // create a buffer around the queried geometries
+        distanceSlider.on("thumb-drag", function(event) {
+          if (event.state === "stop") {
+            createBuffer(stationGeometries);
+          }
+        });
+        // set a new definitionExpression on the station layer
+        // and create a new buffer around the new station
+        stationTypeSelect.addEventListener("change", function() {
+          var type = event.target.value;
+          setstationDefinitionExpression(type).then(createBuffer);
+        });
+
+        // query for earthquakes with the specified elevation
+        // within the buffer geometry when the query button
+        // is clicked
+        queryQuakes.addEventListener("click", function() {
+          queryEarthquakes().then(displayResults);
+        });
+
+        function queryEarthquakes() {
+          var query = quakesLayer.createQuery();
+          query.where = "X2016 >= " + magSlider.values[0];
+          query.geometry = stationBuffer;
+          query.spatialRelationship = "intersects";
+
+          return quakesLayer.queryFeatures(query);
+        }
+
+        // display the earthquake query results in the
+        // view and print the number of results to the DOM
+        function displayResults(results) {
+          resultsLayer.removeAll();
+          var features = results.features.map(function(graphic) {
+            graphic.symbol = {
+              type: "simple-marker", // autocasts as new SimpleMarkerSymbol()
+              style: "diamond",
+              size: 6.5,
+              color: "darkorange"
+            };
+            return graphic;
+          });
+          var numQuakes = features.length;
+          document.getElementById("results").innerHTML =
+            numQuakes + " Lakes found";
+          resultsLayer.addMany(features);
+        }
+		var toggle = new BasemapToggle({
+		
+          view: view, // view that provides access to the map's 'topo' basemap
+		  
+          nextBasemap: "topo" // allows for toggling to the 'hybrid' basemap
+		  
+        });
+		view.ui.add(toggle, "bottom-left");
+		 var scaleBar = new ScaleBar({
+          view: view,
+          unit: "dual" // The scale bar displays both metric and non-metric units.
+        });
+
+        // Add the widget to the bottom left corner of the view
+		view.ui.add(scaleBar, "bottom-right");
+
+        view.ui.add(
+          new Search({
+            view: view
+          }),
+          "top-right"
+        );
+      });
+	  
+	  
+    </script>
+  </head>
+
+   <body>
+   <div id="seasons-filter" class="esri-widget">
+      <div class="season-item visible-season" data-groups="First">First</div>
+      <div class="season-item visible-season" data-groups="Second">Second</div>
+      <div class="season-item visible-season" data-groups="Third">Third</div>
+    </div>
+	
+    <div id="viewDiv"></div>
+    <div id="infoDiv" class="esri-widget">
+      <div id="drop-downs">
+        Select Station Precipitation:
+        <select id="station-type" class="esri-widget"></select>
+      </div>
+      Station buffer distance (miles):
+      <div id="distance" class="slider"></div>
+      Lake elevation:
+      <div id="mag" class="slider"></div>
+      <button id="query-quakes" class="esri-widget">Query Lakes</button>
+      <div id="results" class="esri-widget"></div>
+    </div>
+  </body>
+</html>
